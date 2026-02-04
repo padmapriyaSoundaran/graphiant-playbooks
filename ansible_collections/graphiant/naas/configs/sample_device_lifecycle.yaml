@@ -1,0 +1,203 @@
+# Sample Device Lifecycle Configuration File
+# ===========================================
+#
+# This configuration file demonstrates how to manage device lifecycle states
+# in Graphiant using the graphiant_device_lifecycle module.
+#
+# The configuration uses the PUT /v1/devices/bringup API endpoint.
+#
+# API Reference:
+# https://api.graphiant.io/v1/devices/bringup
+# Method: PUT
+# Payload: {
+#   "deviceIds": [device_id],
+#   "status": "Pending"  # for staging
+# }
+#
+# Supported Status Values (user-friendly format):
+#   - "staging": Move device to staging/Pending state
+#   - "active": Activate device (Allowed state)
+#   - "maintenance": Put device in maintenance mode
+#   - "deactivate": Deactivate device (Denied state)
+#   - "decommission": Remove device (Removed state)
+#
+# Usage:
+#   ansible-playbook playbooks/device_lifecycle_management.yml \
+#     --tags change_lifecycle_state \
+#     -e "operation=change_lifecycle_state" \
+#     -e "config_file=sample_device_lifecycle.yaml" \
+#     -e "graphiant_host=https://api.graphiant.io" \
+#     -e "graphiant_username=your-username" \
+#     -e "graphiant_password=your-password"
+#
+# Configuration Format (same as playbook input):
+# devices:
+#   device-name:
+#     status: "staging"  # or "active", "maintenance", "deactivate", "decommission"
+#
+
+# ==============================================================================
+# DEVICE LIFECYCLE EXAMPLES
+# ==============================================================================
+
+# Example 1: Move devices to staging (Pending) state
+# Using the same format as Ansible playbook input (dictionary format)
+# devices:
+#   edge-1-sdktest:
+#     status: "staging"
+#   
+#   edge-2-sdktest:
+#     status: "staging"
+
+# Example 2: Activate devices
+# devices:
+#   edge-1-sdktest:
+#     status: "active"
+#   edge-2-sdktest:
+#     status: "active"
+
+# Example 3: Deactivate devices
+# devices:
+#   edge-1-sdktest:
+#     status: "deactivate"
+#   edge-2-sdktest:
+#     status: "deactivate"
+
+# Example 4: Remove devices
+# devices:
+#   edge-1-sdktest:
+#     status: "decommission"
+#   edge-2-sdktest:
+#     status: "decommission"
+
+# Example 5: Put devices in maintenance mode
+# devices:
+#   edge-1-sdktest:
+#     status: "maintenance"
+#   edge-2-sdktest:
+#     status: "maintenance"
+
+# ==============================================================================
+# DEVICE UPGRADE SCHEDULING EXAMPLES
+# ==============================================================================
+#
+# The upgrade scheduling uses the PUT /v1/devices/upgrade/schedule API endpoint.
+#
+# API Reference:
+# https://api.graphiant.io/v1/devices/upgrade/schedule
+# Method: PUT
+# Payload: {
+#   "action": "InstallActivate",  # or "Install"
+#   "ts": {
+#     "seconds": 1770018050,
+#     "nanos": 236000000
+#   },
+#   "deviceVersions": [
+#     {
+#       "deviceId": 30000051596,
+#       "version": {
+#         "release": "Latest"  # or "stable", "recommended"
+#       }
+#     }
+#   ]
+# }
+#
+# Supported Actions:
+#   - "InstallActivate": Install and activate the upgrade immediately
+#   - "Install": Install the upgrade without activating
+#
+# Supported Release Versions:
+#   - "Latest": Latest available version
+#   - "stable": Stable version
+#   - "recommended": Recommended version
+#
+# Usage (using config file):
+#   ansible-playbook playbooks/device_lifecycle_management.yml \
+#     --tags schedule_upgrade \
+#     -e "operation=schedule_upgrade" \
+#     -e "config_file=sample_device_lifecycle.yaml" \
+#     -e "action=InstallActivate" \
+#     -e "graphiant_host=https://api.graphiant.io" \
+#     -e "graphiant_username=your-username" \
+#     -e "graphiant_password=your-password"
+#
+# Usage (using direct device list):
+#   ansible-playbook playbooks/device_lifecycle_management.yml \
+#     --tags schedule_upgrade \
+#     -e "operation=schedule_upgrade" \
+#     -e 'devices={"edge-1-sdktest":{"version":{"release":"Latest"}}}' \
+#     -e "action=InstallActivate" \
+#     -e "graphiant_host=https://api.graphiant.io" \
+#     -e "graphiant_username=your-username" \
+#     -e "graphiant_password=your-password"
+#
+# Configuration Format (same as playbook input):
+# devices:
+#   device-name:
+#     version:
+#       release: "Latest"  # or "stable", "recommended"
+
+# Example 6: Schedule upgrade for devices (InstallActivate with Latest version)
+devices:
+  edge-1-sdktest:
+    version:
+      release: "Latest"
+
+# Example 7: Schedule upgrade for devices (Install only, stable version)
+# devices:
+#   edge-1-sdktest:
+#     version:
+#       release: "stable"
+#   edge-2-sdktest:
+#     version:
+#       release: "stable"
+# Note: Use -e "action=Install" when running the playbook
+
+# Example 8: Schedule upgrade with custom timestamp
+# devices:
+#   edge-1-sdktest:
+#     version:
+#       release: "recommended"
+# Note: Use -e 'ts={"seconds":1770018050,"nanos":236000000}' when running the playbook
+
+# ==============================================================================
+# GET UPGRADE STATUS EXAMPLES
+# ==============================================================================
+#
+# The get_upgrade_status operation uses the GET /v1/edges-summary API endpoint
+# with upgradeSummary information included.
+#
+# API Reference:
+# https://api.graphiant.io/v1/edges-summary?filter[role]=UnknownDeviceRole&upgradeSummary=true
+# Method: GET
+#
+# Usage (using config file):
+#   ansible-playbook playbooks/device_lifecycle_management.yml \
+#     --tags get_upgrade_status \
+#     -e "operation=get_upgrade_status" \
+#     -e "config_file=sample_device_lifecycle.yaml" \
+#     -e "role=UnknownDeviceRole" \
+#     -e "graphiant_host=https://api.graphiant.io" \
+#     -e "graphiant_username=your-username" \
+#     -e "graphiant_password=your-password"
+#
+# Usage (using direct device list):
+#   ansible-playbook playbooks/device_lifecycle_management.yml \
+#     --tags get_upgrade_status \
+#     -e "operation=get_upgrade_status" \
+#     -e 'devices=["edge-1-sdktest"]' \
+#     -e "role=UnknownDeviceRole" \
+#     -e "graphiant_host=https://api.graphiant.io" \
+#     -e "graphiant_username=your-username" \
+#     -e "graphiant_password=your-password"
+#
+# Configuration Format (for get_upgrade_status, devices is a list):
+# devices:
+#   - device-name-1
+#   - device-name-2
+
+# Example 9: Get upgrade status for specific devices
+# For get_upgrade_status operation, devices should be a list
+# devices:
+#   - edge-1-sdktest
+#   - edge-2-sdktest

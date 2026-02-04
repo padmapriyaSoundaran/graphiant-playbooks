@@ -1,0 +1,340 @@
+---
+# Device Lifecycle Management Playbook
+# ====================================
+#
+# This playbook demonstrates how to manage device lifecycle states in Graphiant
+# using the graphiant_device_lifecycle module.
+#
+# Features:
+# - Change device lifecycle status (Pending/staging, Allowed/active, Denied, Removed, Maintenance)
+# - Schedule device upgrades (InstallActivate or Install)
+# - Support for config file input or direct device list
+# - Parallel execution for multiple devices
+#
+# Usage (using config file):
+#   ansible-playbook playbooks/device_lifecycle_management.yml \
+#     --tags change_lifecycle_state \
+#     -e "config_file=sample_device_lifecycle.yaml" \
+#     -e "graphiant_host=https://api.graphiant.io" \
+#     -e "graphiant_username=your-username" \
+#     -e "graphiant_password=your-password"
+#
+# Usage (using direct device list):
+#   ansible-playbook playbooks/device_lifecycle_management.yml \
+#     --tags change_lifecycle_state \
+#     -e 'devices={"edge-1-sdktest":{"status":"staging"},"edge-2-sdktest":{"status":"active"}}' \
+#     -e "graphiant_host=https://api.graphiant.io" \
+#     -e "graphiant_username=your-username" \
+#     -e "graphiant_password=your-password"
+#
+# Available tags:
+#   - change_lifecycle_state: Change device lifecycle status
+#   - schedule_upgrade: Schedule device upgrades
+#   - get_upgrade_status: Get device upgrade status
+#   - info: Display operation info only
+#
+
+- name: Device Lifecycle Management
+  hosts: localhost
+  gather_facts: false
+  vars:
+    # Default operation (can be overridden with -e)
+    operation: "change_lifecycle_state"
+    # Default configuration file (can be overridden with -e)
+    config_file: "sample_device_lifecycle.yaml"
+    # Optional direct device list (can be overridden with -e)
+    # devices:
+    #   edge-1-sdktest:
+    #     status: "staging"
+    #   edge-2-sdktest:
+    #     status: "active"
+
+    # Use YAML anchors to avoid repetition
+    graphiant_client_params: &graphiant_client_params
+      host: "{{ graphiant_host | default(lookup('env', 'GRAPHIANT_HOST')) }}"
+      username: "{{ graphiant_username | default(lookup('env', 'GRAPHIANT_USERNAME')) }}"
+      password: "{{ graphiant_password | default(lookup('env', 'GRAPHIANT_PASSWORD')) }}"
+
+  tasks:
+    # Parse devices string to dict if provided as string
+    - name: Parse devices string to dictionary
+      ansible.builtin.set_fact:
+        devices_parsed: "{{ devices | from_json if devices is string else devices }}"
+      when: devices is defined
+      tags: ['always']
+
+    - name: Display operation info
+      ansible.builtin.debug:
+        msg: |
+          Device Lifecycle Management
+          ===========================
+          {% if config_file is defined and config_file %}
+          Config File: {{ config_file }}
+          {% endif %}
+          {% if devices is defined and devices %}
+          Direct Device List: {{ devices | length }} device(s)
+          {% endif %}
+          Portal: {{ graphiant_host | default(lookup('env', 'GRAPHIANT_HOST')) }}
+      tags: ['always', 'info']
+
+    # Process devices from config file (single call for all devices)
+    - name: Change device lifecycle status from config file
+      graphiant.naas.graphiant_device_lifecycle:
+        <<: *graphiant_client_params
+        operation: change_lifecycle_state
+        config_file: "{{ config_file }}"
+        detailed_logs: true
+        state: present
+      register: lifecycle_result
+      when:
+        - operation == 'change_lifecycle_state'
+        - config_file is defined and config_file | length > 0
+        - (devices_parsed is not defined or devices_parsed | length == 0) and (devices is not defined or devices | length == 0)
+      tags: ['change_lifecycle_state']
+
+    # Schedule upgrade from config file
+    - name: Schedule device upgrade from config file
+      graphiant.naas.graphiant_device_lifecycle:
+        <<: *graphiant_client_params
+        operation: schedule_upgrade
+        config_file: "{{ config_file }}"
+        action: "{{ action | default('InstallActivate') }}"
+        ts: "{{ ts | default(None) }}"
+        detailed_logs: true
+      register: upgrade_result
+      when:
+        - operation == 'schedule_upgrade'
+        - config_file is defined and config_file | length > 0
+        - (devices_parsed is not defined or devices_parsed | length == 0) and (devices is not defined or devices | length == 0)
+      tags: ['schedule_upgrade']
+
+    # Process devices using Ansible loop for parallel execution
+    - name: Change device lifecycle status using loop
+      graphiant.naas.graphiant_device_lifecycle:
+        <<: *graphiant_client_params
+        operation: change_lifecycle_state
+        device_name: "{{ item.key }}"
+        status: "{{ item.value.status }}"
+        detailed_logs: true
+        state: present
+      register: lifecycle_results
+      loop: "{{ (devices_parsed | default(devices)) | dict2items }}"
+      when:
+        - operation == 'change_lifecycle_state'
+        - (devices_parsed is defined and devices_parsed | length > 0) or (devices is defined and devices is mapping and devices | length > 0)
+      tags: ['change_lifecycle_state']
+
+    # Schedule upgrade using loop
+    - name: Schedule device upgrade using loop
+      graphiant.naas.graphiant_device_lifecycle:
+        <<: *graphiant_client_params
+        operation: schedule_upgrade
+        device_name: "{{ item.key }}"
+        version: "{{ item.value.version }}"
+        action: "{{ item.value.action | default(action | default('InstallActivate')) }}"
+        ts: "{{ item.value.ts | default(ts | default(None)) }}"
+        detailed_logs: true
+      register: upgrade_results
+      loop: "{{ (devices_parsed | default(devices)) | dict2items }}"
+      when:
+        - operation == 'schedule_upgrade'
+        - (devices_parsed is defined and devices_parsed | length > 0) or (devices is defined and devices is mapping and devices | length > 0)
+      tags: ['schedule_upgrade']
+      loop_control:
+        label: "{{ item.key }}"
+
+    # Combine results from loop execution
+    - name: Combine loop results
+      ansible.builtin.set_fact:
+        lifecycle_result:
+          changed: "{{ lifecycle_results.results | selectattr('changed', 'equalto', true) | list | length > 0 }}"
+          updated_devices: "{{ lifecycle_results.results | selectattr('updated_devices', 'defined') | map(attribute='updated_devices') | flatten | list }}"
+          failed_devices: "{{ lifecycle_results.results | selectattr('failed_devices', 'defined') | map(attribute='failed_devices') | flatten | list }}"
+          skipped_devices: "{{ lifecycle_results.results | selectattr('skipped_devices', 'defined') | map(attribute='skipped_devices') | flatten | list }}"
+          msg: "Updated {{ lifecycle_results.results | selectattr('updated_devices', 'defined') | map(attribute='updated_devices') | flatten | list | length }} device(s)"
+      when:
+        - operation == 'change_lifecycle_state'
+        - (devices_parsed is defined and devices_parsed | length > 0) or (devices is defined and devices is mapping and devices | length > 0)
+        - lifecycle_results is defined
+      tags: ['change_lifecycle_state']
+
+    - name: Display lifecycle result
+      ansible.builtin.debug:
+        msg: "{{ lifecycle_result.msg }}"
+      when:
+        - operation == 'change_lifecycle_state'
+        - lifecycle_result is defined and lifecycle_result.msg is defined
+      tags: ['change_lifecycle_state']
+
+    - name: Display updated devices
+      ansible.builtin.debug:
+        msg: |
+          Updated Devices:
+          {{ lifecycle_result.updated_devices | to_nice_json }}
+      when:
+        - operation == 'change_lifecycle_state'
+        - lifecycle_result is defined and lifecycle_result.updated_devices is defined and lifecycle_result.updated_devices | length > 0
+      tags: ['change_lifecycle_state']
+
+    - name: Display failed devices
+      ansible.builtin.debug:
+        msg: |
+          Failed Devices:
+          {{ lifecycle_result.failed_devices | to_nice_json }}
+      when:
+        - operation == 'change_lifecycle_state'
+        - lifecycle_result is defined and lifecycle_result.failed_devices is defined and lifecycle_result.failed_devices | length > 0
+      tags: ['change_lifecycle_state']
+
+    - name: Display loop execution summary
+      ansible.builtin.debug:
+        msg: |
+          Loop Execution Summary:
+          =======================
+          Total devices processed: {{ lifecycle_results.results | length }}
+          Successful: {{ lifecycle_results.results | selectattr('changed', 'equalto', true) | list | length }}
+          Failed: {{ lifecycle_results.results | selectattr('failed', 'equalto', true) | list | length }}
+      when:
+        - operation == 'change_lifecycle_state'
+        - devices is defined and devices | length > 0
+        - lifecycle_results is defined
+      tags: ['change_lifecycle_state']
+
+    - name: Combine upgrade loop results
+      ansible.builtin.set_fact:
+        upgrade_result:
+          changed: "{{ upgrade_results.results | selectattr('changed', 'equalto', true) | list | length > 0 }}"
+          scheduled_devices: "{{ upgrade_results.results | selectattr('scheduled_devices', 'defined') | map(attribute='scheduled_devices') | flatten | list }}"
+          failed_devices: "{{ upgrade_results.results | selectattr('failed_devices', 'defined') | map(attribute='failed_devices') | flatten | list }}"
+          skipped_devices: "{{ upgrade_results.results | selectattr('skipped_devices', 'defined') | map(attribute='skipped_devices') | flatten | list }}"
+          msg: "Scheduled upgrade for {{ upgrade_results.results | selectattr('scheduled_devices', 'defined') | map(attribute='scheduled_devices') | flatten | list | length }} device(s)"
+      when:
+        - operation == 'schedule_upgrade'
+        - (devices_parsed is defined and devices_parsed | length > 0) or (devices is defined and devices is mapping and devices | length > 0)
+        - upgrade_results is defined
+      tags: ['schedule_upgrade']
+
+    # Display upgrade scheduling results
+    - name: Display upgrade scheduling result
+      ansible.builtin.debug:
+        msg: "{{ upgrade_result.msg }}"
+      when:
+        - operation == 'schedule_upgrade'
+        - upgrade_result is defined and upgrade_result.msg is defined
+      tags: ['schedule_upgrade']
+
+    - name: Display scheduled devices
+      ansible.builtin.debug:
+        msg: |
+          Scheduled Devices:
+          {{ upgrade_result.scheduled_devices | to_nice_json }}
+      when:
+        - operation == 'schedule_upgrade'
+        - upgrade_result is defined and upgrade_result.scheduled_devices is defined and upgrade_result.scheduled_devices | length > 0
+      tags: ['schedule_upgrade']
+
+    - name: Display failed upgrade devices
+      ansible.builtin.debug:
+        msg: |
+          Failed Devices:
+          {{ upgrade_result.failed_devices | to_nice_json }}
+      when:
+        - operation == 'schedule_upgrade'
+        - upgrade_result is defined and upgrade_result.failed_devices is defined and upgrade_result.failed_devices | length > 0
+      tags: ['schedule_upgrade']
+
+    - name: Display upgrade loop execution summary
+      ansible.builtin.debug:
+        msg: |
+          Upgrade Scheduling Summary:
+          ============================
+          Total devices processed: {{ upgrade_results.results | length }}
+          Successful: {{ upgrade_results.results | selectattr('changed', 'equalto', true) | list | length }}
+          Failed: {{ upgrade_results.results | selectattr('failed', 'equalto', true) | list | length }}
+      when:
+        - operation == 'schedule_upgrade'
+        - devices is defined and devices | length > 0
+        - upgrade_results is defined
+      tags: ['schedule_upgrade']
+
+    # Get upgrade status using loop (support list format)
+    - name: Get device upgrade status using loop
+      graphiant.naas.graphiant_device_lifecycle:
+        <<: *graphiant_client_params
+        operation: get_upgrade_status
+        device_name: "{{ item }}"
+        role: "{{ role | default('UnknownDeviceRole') }}"
+        detailed_logs: true
+      register: upgrade_status_results
+      loop: "{{ (devices_parsed | default(devices)) | list }}"
+      when:
+        - operation == 'get_upgrade_status'
+        - (devices_parsed is defined and devices_parsed | length > 0) or (devices is defined and devices | length > 0)
+      tags: ['get_upgrade_status']
+      loop_control:
+        label: "{{ item }}"
+
+    # Display upgrade status results
+    - name: Display upgrade status result message
+      ansible.builtin.debug:
+        msg: "{{ item.get('msg', '') }}"
+      loop: "{{ upgrade_status_results.results | default([]) }}"
+      when:
+        - operation == 'get_upgrade_status'
+        - upgrade_status_results is defined
+        - item.get('msg', '') != ''
+      tags: ['get_upgrade_status']
+
+    - name: Display devices upgrade status details
+      ansible.builtin.debug:
+        msg: |
+          ╔══════════════════════════════════════════════════════════════════════════╗
+          ║                    DEVICE UPGRADE STATUS REPORT                          ║
+          ╠══════════════════════════════════════════════════════════════════════════╣
+          ║ Device Name:     {{ item.item | default('N/A') | truncate(60) }}║
+          ║ Device ID:       {{ item.devices_upgrade_status[item.item].device_id | default('N/A') }}║
+          ╠══════════════════════════════════════════════════════════════════════════╣
+          ║ CURRENT STATUS                                                           ║
+          ╠══════════════════════════════════════════════════════════════════════════╣
+          ║ Upgrade Status:  {{ item.devices_upgrade_status[item.item].upgrade_status | default('N/A') }}║
+          ║ Running Version: {{ item.devices_upgrade_status[item.item].running_version.version | default('N/A') }} ({{ item.devices_upgrade_status[item.item].running_version.release | default('N/A') }})║
+          ║ Version Name:    {{ item.devices_upgrade_status[item.item].running_version.name | default('N/A') }}║
+          ╠══════════════════════════════════════════════════════════════════════════╣
+          ║ SCHEDULED UPGRADE                                                        ║
+          ╠══════════════════════════════════════════════════════════════════════════╣
+          ║ Action:          {{ item.devices_upgrade_status[item.item].scheduled_upgrade.action | default('N/A') }}║
+          ║ State:           {{ item.devices_upgrade_status[item.item].scheduled_upgrade.state | default('N/A') }}║
+          ║ Scheduled Time:  {{ item.devices_upgrade_status[item.item].scheduled_upgrade.ts.seconds | default('N/A') }}║
+          {% if item.devices_upgrade_status[item.item].scheduled_upgrade.version.release is defined %}
+          ║ Target Version:  {{ item.devices_upgrade_status[item.item].scheduled_upgrade.version.release | default('N/A') }}║
+          {% else %}
+          ║ Target Version:  N/A║
+          {% endif %}
+          ╠══════════════════════════════════════════════════════════════════════════╣
+          ║ LAST UPGRADE                                                             ║
+          ╠══════════════════════════════════════════════════════════════════════════╣
+          ║ Timestamp:       {{ item.devices_upgrade_status[item.item].last_upgrade_ts.seconds | default('N/A') }}║
+          ╚══════════════════════════════════════════════════════════════════════════╝
+      loop: "{{ upgrade_status_results.results | default([]) }}"
+      when:
+        - operation == 'get_upgrade_status'
+        - upgrade_status_results is defined
+        - item.devices_upgrade_status is defined
+        - item.item in item.devices_upgrade_status
+      tags: ['get_upgrade_status']
+
+    - name: Display upgrade status execution summary
+      ansible.builtin.debug:
+        msg: |
+          ╔══════════════════════════════════════════════════════════════════════════╗
+          ║                    UPGRADE STATUS SUMMARY                                ║
+          ╠══════════════════════════════════════════════════════════════════════════╣
+          ║ Total devices processed:  {{ upgrade_status_results.results | length }}║
+          ║ Successful:                {{ upgrade_status_results.results | selectattr('failed', 'equalto', false) | list | length }}║
+          ║ Failed:                   {{ upgrade_status_results.results | selectattr('failed', 'equalto', true) | list | length }}║
+          ╚══════════════════════════════════════════════════════════════════════════╝
+      when:
+        - operation == 'get_upgrade_status'
+        - devices is defined and devices | length > 0
+        - upgrade_status_results is defined
+      tags: ['get_upgrade_status']

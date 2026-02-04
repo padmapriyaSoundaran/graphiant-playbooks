@@ -11,6 +11,7 @@ from .global_config_manager import GlobalConfigManager
 from .site_manager import SiteManager
 from .data_exchange_manager import DataExchangeManager
 from .device_config_manager import DeviceConfigManager
+from .device_lifecycle_manager import DeviceLifecycleManager
 from .vrrp_interface_manager import VRRPInterfaceManager
 from .lag_interface_manager import LagInterfaceManager
 from .logger import setup_logger
@@ -62,6 +63,7 @@ class GraphiantConfig:
             self.sites = SiteManager(self.config_utils)
             self.data_exchange = DataExchangeManager(self.config_utils)
             self.device_config = DeviceConfigManager(self.config_utils)
+            self.device_lifecycle = DeviceLifecycleManager(self.config_utils)
             self.vrrp_interfaces = VRRPInterfaceManager(self.config_utils)
             self.lag_interfaces = LagInterfaceManager(self.config_utils)
 
@@ -85,6 +87,7 @@ class GraphiantConfig:
             'sites': hasattr(self, 'sites') and self.sites is not None,
             'data_exchange': hasattr(self, 'data_exchange') and self.data_exchange is not None,
             'device_config': hasattr(self, 'device_config') and self.device_config is not None,
+            'device_lifecycle': hasattr(self, 'device_lifecycle') and self.device_lifecycle is not None,
             'vrrp_interfaces': hasattr(self, 'vrrp_interfaces') and self.vrrp_interfaces is not None,
             'config_utils': hasattr(self, 'config_utils') and self.config_utils is not None,
             'lag_interfaces': hasattr(self, 'lag_interfaces') and self.lag_interfaces is not None

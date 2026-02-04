@@ -642,6 +642,104 @@ class TestGraphiantPlaybooks(unittest.TestCase):
             template_file="device_config_template.yaml")
         LOG.info("Configure device configuration result: %s", result)
 
+    def test_schedule_device_upgrade_edge1_installactivate(self):
+        """
+        Test scheduling device upgrade for edge-1-sdktest with InstallActivate action.
+        This test verifies the schedule_upgrade operation with direct device input.
+        """
+        base_url, username, password = read_config()
+        graphiant_config = GraphiantConfig(base_url=base_url, username=username, password=password)
+        
+        device_name = "edge-1-sdktest"
+        action = "InstallActivate"
+        version = {"release": "Latest"}
+        
+        LOG.info(f"Scheduling upgrade for {device_name} with action {action} and version {version}")
+        
+        # Schedule upgrade using direct device dictionary
+        devices = {
+            device_name: {
+                "version": version
+            }
+        }
+        
+        result = graphiant_config.device_lifecycle.schedule_upgrade(
+            devices=devices,
+            action=action
+        )
+        
+        LOG.info(f"Schedule device upgrade result: {result}")
+        
+        # Verify the result
+        assert result.get('changed') is True, "Operation should report changes"
+        assert 'scheduled_devices' in result, "Result should contain 'scheduled_devices'"
+        assert len(result.get('scheduled_devices', [])) > 0, "Should have at least one scheduled device"
+        
+        scheduled_device = result['scheduled_devices'][0]
+        assert scheduled_device.get('device_name') == device_name, \
+            f"Expected device name {device_name}, got {scheduled_device.get('device_name')}"
+        assert scheduled_device.get('action') == action, \
+            f"Expected action {action}, got {scheduled_device.get('action')}"
+        assert scheduled_device.get('version') == version, \
+            f"Expected version {version}, got {scheduled_device.get('version')}"
+        
+        LOG.info(f"✅ Successfully scheduled upgrade for {device_name} with action {action}")
+        
+        return result
+
+    def test_get_device_upgrade_status(self):
+        """
+        Test getting device upgrade status for edge-1-sdktest.
+        This test verifies the get_upgrade_status operation with direct device input.
+        """
+        base_url, username, password = read_config()
+        graphiant_config = GraphiantConfig(base_url=base_url, username=username, password=password)
+        
+        device_name = "edge-1-sdktest"
+        role = "UnknownDeviceRole"  # Default role for get_upgrade_status
+        
+        LOG.info(f"Getting upgrade status for device {device_name} with role {role}")
+        result = graphiant_config.device_lifecycle.get_upgrade_status(
+            device_name=device_name,
+            role=role
+        )
+        LOG.info(f"Get device upgrade status result: {result}")
+        
+        # Verify the result
+        assert result.get('changed') is False, "get_upgrade_status is a read-only operation"
+        assert 'devices_upgrade_status' in result, "Result should contain 'devices_upgrade_status'"
+        assert isinstance(result.get('devices_upgrade_status'), dict), "devices_upgrade_status should be a dictionary"
+        
+        devices_upgrade_status = result.get('devices_upgrade_status', {})
+        assert len(devices_upgrade_status) > 0, "Should have at least one device in upgrade status"
+        
+        if device_name in devices_upgrade_status:
+            device_status = devices_upgrade_status[device_name]
+            assert 'device_id' in device_status, "Device status should contain 'device_id'"
+            assert 'upgrade_status' in device_status, "Device status should contain 'upgrade_status'"
+            assert 'running_version' in device_status, "Device status should contain 'running_version'"
+            
+            LOG.info(f"✅ Successfully retrieved upgrade status for {device_name}")
+            LOG.info(f"   Device ID: {device_status.get('device_id')}")
+            LOG.info(f"   Upgrade Status: {device_status.get('upgrade_status')}")
+            LOG.info(f"   Running Version: {device_status.get('running_version')}")
+            
+            if device_status.get('scheduled_upgrade'):
+                LOG.info(f"   Scheduled Upgrade: {device_status.get('scheduled_upgrade')}")
+        else:
+            # Check if device is in failed_devices
+            failed_devices = result.get('failed_devices', [])
+            device_failed = any(fd.get('device_name') == device_name for fd in failed_devices)
+            if device_failed:
+                LOG.warning(f"Device {device_name} failed to retrieve upgrade status")
+            else:
+                LOG.warning(f"Device {device_name} not found in upgrade status results")
+        
+        assert len(result.get('failed_devices', [])) == 0 or device_name in devices_upgrade_status, \
+            f"Device {device_name} should either be in devices_upgrade_status or failed_devices"
+        
+        return result
+
 
 if __name__ == '__main__':
     suite = unittest.TestSuite()
@@ -756,5 +854,9 @@ if __name__ == '__main__':
     # Device Configuration Management Tests
     suite.addTest(TestGraphiantPlaybooks('test_show_validated_payload_for_device_config'))
     suite.addTest(TestGraphiantPlaybooks('test_configure_device_config'))
+
+    # Device Lifecycle Management Tests
+    suite.addTest(TestGraphiantPlaybooks('test_schedule_device_upgrade_edge1_installactivate'))
+    suite.addTest(TestGraphiantPlaybooks('test_get_device_upgrade_status'))
 
     runner = unittest.TextTestRunner(verbosity=2).run(suite)
