@@ -291,30 +291,31 @@
           ╔══════════════════════════════════════════════════════════════════════════╗
           ║                    DEVICE UPGRADE STATUS REPORT                          ║
           ╠══════════════════════════════════════════════════════════════════════════╣
-          ║ Device Name:     {{ item.item | default('N/A') | truncate(60) }}║
-          ║ Device ID:       {{ item.devices_upgrade_status[item.item].device_id | default('N/A') }}║
+          ║ Device Name:     {{ "%-47s" | format(item.item | default("N/A") | string) }}║
+          ║ Device ID:       {{ "%-47s" | format(item.devices_upgrade_status[item.item].device_id | default("N/A") | string) }}║
           ╠══════════════════════════════════════════════════════════════════════════╣
           ║ CURRENT STATUS                                                           ║
           ╠══════════════════════════════════════════════════════════════════════════╣
-          ║ Upgrade Status:  {{ item.devices_upgrade_status[item.item].upgrade_status | default('N/A') }}║
-          ║ Running Version: {{ item.devices_upgrade_status[item.item].running_version.version | default('N/A') }} ({{ item.devices_upgrade_status[item.item].running_version.release | default('N/A') }})║
-          ║ Version Name:    {{ item.devices_upgrade_status[item.item].running_version.name | default('N/A') }}║
+          ║ Upgrade Status:  {{ "%-47s" | format(item.devices_upgrade_status[item.item].upgrade_status | default("N/A") | string) }}║
+          ║ Running Version: {{ "%-27s" | format(item.devices_upgrade_status[item.item].running_version.version | default("N/A") | string) }}({{ "%-13s" | format(item.devices_upgrade_status[item.item].running_version.release | default("N/A") | string) }})║
+          ║ Version Name:    {{ "%-47s" | format(item.devices_upgrade_status[item.item].running_version.name | default("N/A") | string) }}║
           ╠══════════════════════════════════════════════════════════════════════════╣
           ║ SCHEDULED UPGRADE                                                        ║
           ╠══════════════════════════════════════════════════════════════════════════╣
-          ║ Action:          {{ item.devices_upgrade_status[item.item].scheduled_upgrade.action | default('N/A') }}║
-          ║ State:           {{ item.devices_upgrade_status[item.item].scheduled_upgrade.state | default('N/A') }}║
-          ║ Scheduled Time:  {{ item.devices_upgrade_status[item.item].scheduled_upgrade.ts.seconds | default('N/A') }}║
+          ║ Action:          {{ "%-47s" | format(item.devices_upgrade_status[item.item].scheduled_upgrade.action | default("N/A") | string) }}║
+          ║ State:           {{ "%-47s" | format(item.devices_upgrade_status[item.item].scheduled_upgrade.state | default("N/A") | string) }}║
+          ║ Scheduled Time:  {{ "%-47s" | format(item.devices_upgrade_status[item.item].scheduled_upgrade.ts.seconds | default("N/A") | string) }}║
           {% if item.devices_upgrade_status[item.item].scheduled_upgrade.version.release is defined %}
-          ║ Target Version:  {{ item.devices_upgrade_status[item.item].scheduled_upgrade.version.release | default('N/A') }}║
+          ║ Target Version:  {{ "%-47s" | format(item.devices_upgrade_status[item.item].scheduled_upgrade.version.release | default("N/A") | string) }}║
           {% else %}
-          ║ Target Version:  N/A║
+          ║ Target Version:  {{ "%-47s" | format("N/A") }}║
           {% endif %}
           ╠══════════════════════════════════════════════════════════════════════════╣
           ║ LAST UPGRADE                                                             ║
           ╠══════════════════════════════════════════════════════════════════════════╣
-          ║ Timestamp:       {{ item.devices_upgrade_status[item.item].last_upgrade_ts.seconds | default('N/A') }}║
+          ║ Timestamp:       {{ "%-47s" | format(item.devices_upgrade_status[item.item].last_upgrade_ts.seconds | default("N/A") | string) }}║
           ╚══════════════════════════════════════════════════════════════════════════╝
+      register: upgrade_status_display_output
       loop: "{{ upgrade_status_results.results | default([]) }}"
       when:
         - operation == 'get_upgrade_status'
@@ -322,6 +323,8 @@
         - item.devices_upgrade_status is defined
         - item.item in item.devices_upgrade_status
       tags: ['get_upgrade_status']
+      loop_control:
+        label: "{{ item.item }}"
 
     - name: Display upgrade status execution summary
       ansible.builtin.debug:
@@ -329,10 +332,11 @@
           ╔══════════════════════════════════════════════════════════════════════════╗
           ║                    UPGRADE STATUS SUMMARY                                ║
           ╠══════════════════════════════════════════════════════════════════════════╣
-          ║ Total devices processed:  {{ upgrade_status_results.results | length }}║
-          ║ Successful:                {{ upgrade_status_results.results | selectattr('failed', 'equalto', false) | list | length }}║
-          ║ Failed:                   {{ upgrade_status_results.results | selectattr('failed', 'equalto', true) | list | length }}║
+          ║ Total devices processed:  {{ "%-40s" | format((upgrade_status_results.results | length) | string) }}║
+          ║ Successful:                {{ "%-40s" | format((upgrade_status_results.results | selectattr("failed", "equalto", false) | list | length) | string) }}║
+          ║ Failed:                   {{ "%-40s" | format((upgrade_status_results.results | selectattr("failed", "equalto", true) | list | length) | string) }}║
           ╚══════════════════════════════════════════════════════════════════════════╝
+      register: upgrade_summary_display_output
       when:
         - operation == 'get_upgrade_status'
         - devices is defined and devices | length > 0
