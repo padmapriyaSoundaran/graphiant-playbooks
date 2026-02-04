@@ -520,6 +520,93 @@ class GraphiantPortalClient():
         except ApiException:
             return False
 
+    def put_devices_upgrade_schedule(self, action, device_versions, ts=None):
+        """
+        Schedule device upgrades using PUT /v1/devices/upgrade/schedule API.
+
+        Args:
+            action (str): Upgrade action - "InstallActivate" or "Install"
+            device_versions (list): List of dictionaries with deviceId and version info
+                                   Format: [{"deviceId": int, "version": {"release": str}}, ...]
+            ts (dict, optional): Timestamp with seconds and nanos
+                                Format: {"seconds": int, "nanos": int}
+                                If not provided, uses current time
+
+        Returns:
+            response: The response from the API call to schedule upgrades
+
+        Raises:
+            ApiException: If the API call fails
+        """
+        # Build timestamp - use current time if not provided
+        # Default timestamp is "now" in protobuf/gRPC format: {"seconds": epoch_seconds, "nanos": 0}
+        if ts is None:
+            current_time = int(time.time())
+            ts = {"seconds": current_time, "nanos": 0}  # protobuf/gRPC-style timestamp
+        
+        # Build the request payload
+        data = {
+            "action": action,
+            "ts": ts,
+            "deviceVersions": device_versions
+        }
+        
+        try:
+            LOG.debug("put_devices_upgrade_schedule : %s", json.dumps(data, indent=2))
+            # Use SDK API with from_dict to create request object
+            processed_data = {
+                "action": action,
+                "ts": ts,
+                "deviceVersions": device_versions
+            }
+            put_request = graphiant_sdk.V1DevicesUpgradeSchedulePutRequest.from_dict(processed_data)
+            response = self.api.v1_devices_upgrade_schedule_put(
+                authorization=self.bearer_token,
+                v1_devices_upgrade_schedule_put_request=put_request
+            )
+            return response
+        except ApiException as e:
+            LOG.error("put_devices_upgrade_schedule: API Exception: %s", e)
+            raise APIError(f"Failed to schedule device upgrades: {e}")
+
+    def get_edges_summary_with_upgrade(self, role="UnknownDeviceRole"):
+        """
+        Get edges summary with upgrade status using SDK get_edges_summary() method.
+        Filters by role - upgrade_summary is included in the response from get_edges_summary().
+
+        Args:
+            role (str): Device role to filter by (default: "UnknownDeviceRole")
+                       Options: "UnknownDeviceRole", "cpe", "gateway", etc.
+
+        Returns:
+            list: Filtered list of edges with upgrade summary information
+
+        Raises:
+            ApiException: If the API call fails
+        """
+        try:
+            LOG.debug("get_edges_summary_with_upgrade: role=%s", role)
+            # Use SDK method to get edges summary (upgrade_summary is included in the response)
+            edges_summary_response = self.get_edges_summary()
+            
+            # Filter by role
+            filtered_edges = []
+            for edge in edges_summary_response:
+                # Check if edge matches the role filter
+                edge_role = getattr(edge, 'role', None) if hasattr(edge, 'role') else None
+                if isinstance(edge, dict):
+                    edge_role = edge.get('role')
+                
+                # Filter by role (UnknownDeviceRole means all roles)
+                if role == "UnknownDeviceRole" or edge_role == role:
+                    filtered_edges.append(edge)
+            
+            LOG.debug("get_edges_summary_with_upgrade: Found %d edges with role=%s", len(filtered_edges), role)
+            return filtered_edges
+        except ApiException as e:
+            LOG.error("get_edges_summary_with_upgrade: API Exception: %s", e)
+            raise APIError(f"Failed to get edges summary with upgrade status: {e}")
+
     def patch_global_config(self, **kwargs):
         """
         Patch the global configuration on the system.
