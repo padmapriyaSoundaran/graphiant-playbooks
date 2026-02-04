@@ -456,7 +456,7 @@ def main():
         if operation == 'change_lifecycle_state':
             result = execute_with_logging(
                 module,
-                graphiant_config.device_lifecycle.bringup_device,
+                graphiant_config.device_lifecycle.change_lifecycle_state,
                 config_yaml_file=config_file,
                 devices=devices,
                 success_msg="Device lifecycle status updated successfully"

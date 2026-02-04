@@ -37,7 +37,7 @@ class DeviceLifecycleManager(BaseManager):
     Manager for device lifecycle operations.
 
     This manager handles the following operations:
-    - bringup_device: Change device lifecycle status (PUT /v1/devices/bringup)
+    - change_lifecycle_state: Change device lifecycle status (PUT /v1/devices/bringup)
 
     Configuration files support Jinja2 templating. The config file format (same as playbook input):
 
@@ -56,112 +56,9 @@ class DeviceLifecycleManager(BaseManager):
         """Required by BaseManager abstract method - not used for device lifecycle."""
         pass
 
-    def bringup_device(self, config_yaml_file: str = None, devices: Dict[str, Dict[str, Any]] = None) -> dict:
-        """
-        Change device lifecycle status using config file or direct device list.
-
-        Args:
-            config_yaml_file: Optional path to the YAML configuration file
-            devices: Optional dictionary of devices with their target statuses
-                    Format: {"device-name": {"status": "Pending"}, ...}
-
-        Returns:
-            dict: Result with 'changed' status and list of updated devices
-
-        Raises:
-            ConfigurationError: If configuration processing fails
-            DeviceNotFoundError: If any device cannot be found
-            APIError: If API call fails
-        """
-        result = {
-            'changed': False,
-            'updated_devices': [],
-            'failed_devices': [],
-            'skipped_devices': []
-        }
-
-        # Process devices from config file or direct input
-        device_list = []
-        if config_yaml_file:
-            LOG.info("Processing device lifecycle from config file: %s", config_yaml_file)
-            device_list = self._load_devices_from_config(config_yaml_file)
-        elif devices:
-            LOG.info("Processing device lifecycle from direct device list")
-            device_list = self._load_devices_from_dict(devices)
-        else:
-            raise ConfigurationError("Either config_file or devices parameter must be provided")
-
-        if not device_list:
-            LOG.warning("No devices found in configuration")
-            return result
-
-        # Process each device
-        for device_entry in device_list:
-            device_name = device_entry.get('device_name')
-            status = device_entry.get('status')
-
-            if not device_name:
-                LOG.warning("Skipping entry with missing device_name: %s", device_entry)
-                result['skipped_devices'].append(device_entry)
-                continue
-
-            if not status:
-                LOG.warning("Skipping device '%s' with missing status", device_name)
-                result['skipped_devices'].append(device_name)
-                continue
-
-            try:
-                # Get device ID
-                device_id = self.gsdk.get_device_id(device_name)
-                if device_id is None:
-                    raise DeviceNotFoundError(
-                        f"Device '{device_name}' is not found in the current enterprise: "
-                        f"{self.gsdk.enterprise_info.get('company_name', 'Unknown')}. "
-                        f"Please check device name and enterprise credentials."
-                    )
-
-                # Normalize status to user-friendly format (the SDK method handles conversion)
-                # User inputs: "staging", "active", "maintenance", "deactivate", "decommission"
-                # SDK converts: staging->Pending, active->Allowed, deactivate->Denied, decommission->Removed
-                LOG.info("Updating device '%s' (ID: %s) to status: %s", device_name, device_id, status)
-                success = self.gsdk.put_devices_bringup(device_ids=[device_id], status=status)
-
-                if success:
-                    result['updated_devices'].append({
-                        'device_name': device_name,
-                        'device_id': device_id,
-                        'status': status
-                    })
-                    result['changed'] = True
-                    LOG.info("✓ Successfully updated device '%s' to status: %s", device_name, status)
-                else:
-                    result['failed_devices'].append({
-                        'device_name': device_name,
-                        'device_id': device_id,
-                        'status': status,
-                        'error': 'API call returned False'
-                    })
-                    LOG.error("✗ Failed to update device '%s' to status: %s", device_name, status)
-
-            except DeviceNotFoundError as e:
-                result['failed_devices'].append({
-                    'device_name': device_name,
-                    'error': str(e)
-                })
-                LOG.error("✗ Device not found: %s", device_name)
-            except Exception as e:
-                result['failed_devices'].append({
-                    'device_name': device_name,
-                    'error': str(e)
-                })
-                LOG.error("✗ Error updating device '%s': %s", device_name, str(e))
-
-        return result
-
     def change_lifecycle_state(self, device_ids: list = None, status: str = None, 
                                config_yaml_file: str = None, devices: Dict[str, Dict[str, Any]] = None) -> dict:
         """
-        Alias for bringup_device to maintain consistency with operation naming.
         Change device lifecycle status using device IDs or config file/direct device list.
 
         Args:
@@ -210,8 +107,90 @@ class DeviceLifecycleManager(BaseManager):
                 LOG.error("✗ Error updating devices: %s", str(e))
             return result
         else:
-            # Use the standard bringup_device method
-            return self.bringup_device(config_yaml_file=config_yaml_file, devices=devices)
+            # Process devices from config file or direct input
+            result = {
+                'changed': False,
+                'updated_devices': [],
+                'failed_devices': [],
+                'skipped_devices': []
+            }
+
+            device_list = []
+            if config_yaml_file:
+                LOG.info("Processing device lifecycle from config file: %s", config_yaml_file)
+                device_list = self._load_devices_from_config(config_yaml_file)
+            elif devices:
+                LOG.info("Processing device lifecycle from direct device list")
+                device_list = self._load_devices_from_dict(devices)
+            else:
+                raise ConfigurationError("Either config_file or devices parameter must be provided")
+
+            if not device_list:
+                LOG.warning("No devices found in configuration")
+                return result
+
+            # Process each device
+            for device_entry in device_list:
+                device_name = device_entry.get('device_name')
+                status = device_entry.get('status')
+
+                if not device_name:
+                    LOG.warning("Skipping entry with missing device_name: %s", device_entry)
+                    result['skipped_devices'].append(device_entry)
+                    continue
+
+                if not status:
+                    LOG.warning("Skipping device '%s' with missing status", device_name)
+                    result['skipped_devices'].append(device_name)
+                    continue
+
+                try:
+                    # Get device ID
+                    device_id = self.gsdk.get_device_id(device_name)
+                    if device_id is None:
+                        raise DeviceNotFoundError(
+                            f"Device '{device_name}' is not found in the current enterprise: "
+                            f"{self.gsdk.enterprise_info.get('company_name', 'Unknown')}. "
+                            f"Please check device name and enterprise credentials."
+                        )
+
+                    # Normalize status to user-friendly format (the SDK method handles conversion)
+                    # User inputs: "staging", "active", "maintenance", "deactivate", "decommission"
+                    # SDK converts: staging->Pending, active->Allowed, deactivate->Denied, decommission->Removed
+                    LOG.info("Updating device '%s' (ID: %s) to status: %s", device_name, device_id, status)
+                    success = self.gsdk.put_devices_bringup(device_ids=[device_id], status=status)
+
+                    if success:
+                        result['updated_devices'].append({
+                            'device_name': device_name,
+                            'device_id': device_id,
+                            'status': status
+                        })
+                        result['changed'] = True
+                        LOG.info("✓ Successfully updated device '%s' to status: %s", device_name, status)
+                    else:
+                        result['failed_devices'].append({
+                            'device_name': device_name,
+                            'device_id': device_id,
+                            'status': status,
+                            'error': 'API call returned False'
+                        })
+                        LOG.error("✗ Failed to update device '%s' to status: %s", device_name, status)
+
+                except DeviceNotFoundError as e:
+                    result['failed_devices'].append({
+                        'device_name': device_name,
+                        'error': str(e)
+                    })
+                    LOG.error("✗ Device not found: %s", device_name)
+                except Exception as e:
+                    result['failed_devices'].append({
+                        'device_name': device_name,
+                        'error': str(e)
+                    })
+                    LOG.error("✗ Error updating device '%s': %s", device_name, str(e))
+
+            return result
 
     def schedule_upgrade(self, config_yaml_file: str = None, devices: Dict[str, Dict[str, Any]] = None, 
                          action: str = "InstallActivate", ts: Optional[Dict[str, int]] = None) -> dict:
